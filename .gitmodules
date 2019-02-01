@@ -1,0 +1,3 @@
+[submodule "ritpytrading"]
+	path = ritpytrading
+	url = https://github.com/tjsavage/ritpytrading
