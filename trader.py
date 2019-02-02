@@ -14,7 +14,7 @@ from ritpytrading.ritpytrading import submit_cancel_orders as broker
 from ritpytrading.ritpytrading import orders
 from ritpytrading.ritpytrading import securities
 
-API_KEY = {'X-API-Key': 'SUOIT2WZ'}
+API_KEY = {'X-API-Key': 'PEGP33T3'}
 shutdown = False
 
 host_url = 'localhost:9999'
@@ -47,6 +47,17 @@ def _price_vol_array_to_price_dict(arr):
             price_dict[price] = 0
         price_dict[price] += vol
     return price_dict
+
+def _convert_orders_dict_to_book(orders_dict):
+    curr_book = {"bids":{}, "asks":{}}
+
+    for k, v in orders_dict.items():
+        if v.action == "BUY":
+            curr_book['bids'][v.order_id] = (v.price, v.quantity - v.quantity_filled)
+        else:
+            curr_book['asks'][v.order_id] = (v.price, v.quantity - v.quantity_filled)
+
+    return curr_book
 
 def get_trades_for_ideal_book(curr_book, ideal_book, max_trade=None):
     '''
@@ -134,6 +145,20 @@ def get_trades_for_ideal_book(curr_book, ideal_book, max_trade=None):
     
     return new_orders
 
+def execute_orders(ses, sec, orders):
+    bids = orders['bids']
+    asks = orders['asks']
+    cancels = orders['cancels']
+
+    for p, v in bids:
+        broker.limit_order(ses, sec, 'BUY', v, p)
+    
+    for p, v in asks:
+        broker.limit_order(ses, sec, 'SELL', v, p)
+    
+    for c in cancels:
+        broker.cancel_order(ses, c)        
+
 def main():
     print("Booting up")
     with requests.Session() as ses:
@@ -165,9 +190,9 @@ def main():
             sec_last = sec_data.last
             position = sec_data.position
 
-            o = orders.orders_dict(ses)
-
-            broker.cancel_order_bulk(ses, "<","0","<","0",all_flag=1)
+            orders_dict = orders.orders_dict(ses)
+    
+           #broker.cancel_order_bulk(ses, "<","0","<","0",all_flag=1)
 
             max_buy_volume = limit_stock / 2 - position
             max_sell_volume = limit_stock / 2 + position
@@ -182,7 +207,7 @@ def main():
 
                 while vol_to_buy > 0:
                     vol = min(max_order_size, vol_to_buy)
-                    bids.append((vol, curr_price))
+                    bids.append((curr_price, vol))
 
                     vol_to_buy -= vol
             
@@ -193,22 +218,32 @@ def main():
 
                 while vol_to_sell > 0:
                     vol = min(max_order_size, vol_to_sell)
-                    asks.append((vol, curr_price))
+                    asks.append((curr_price, vol))
 
                     vol_to_sell -= vol
 
 
             print("Position: %d" % position)
-            #print("Asks: " + asks)
-            #print("Bids: " + bids)
 
+            curr_book = _convert_orders_dict_to_book(orders_dict)
+            ideal_book = {
+                "bids": bids,
+                "asks": asks
+            }
+
+            trades = get_trades_for_ideal_book(curr_book, ideal_book, max_trade=max_order_size)
+
+            execute_orders(ses, sec, trades)
+
+            '''
             for bid in bids:
-                q, p = bid
+                p, q = bid
                 broker.limit_order(ses, sec, 'BUY', q, p)
             
             for ask in asks:
-                q, p = ask
+                p, q = ask
                 broker.limit_order(ses, sec, 'SELL', q, p)
+            '''
 
             sleep(lag)
 
