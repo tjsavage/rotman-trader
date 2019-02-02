@@ -130,8 +130,6 @@ def get_trades_for_ideal_book(curr_book, ideal_book, max_trade=None):
                 orders = [id for (id, _price, _vol) in curr_orders_by_price[direction][p]]
                 new_orders['cancels'].extend(orders)
 
-            
-        
         for p, vol in new_vol_by_price[direction].items():
             if max_trade and vol > max_trade:
                 remaining_vol = vol
@@ -160,16 +158,48 @@ def execute_orders(ses, sec, orders):
     for c in cancels:
         broker.cancel_order(ses, c)
 
+def _flesh_out_book(curr_book, center_price, max_buy_volume=25000, max_sell_volume=25000, buy_range=5, buy_offset=1, sell_range=5, sell_offset=1):
+    # Buy order
+    new_book = dict(curr_book)
+    curr_buy_volume = 0
+    curr_sell_volume = 0
+
+    for p, v in new_book['bids']:
+        curr_buy_volume += v
+
+    for p, v in new_book['asks']:
+        curr_sell_volume += v
+
+    max_buy_volume -= curr_buy_volume
+    max_sell_volume -= curr_sell_volume
+
+    for i in range(1 - buy_range - buy_offset, 1 - buy_offset):
+        curr_price = center_price + i / 100
+        vol_to_buy = math.trunc(max_buy_volume / buy_range)
+
+        while vol_to_buy > 0:
+            vol = min(max_order_size, vol_to_buy)
+            new_book['bids'].append((curr_price, vol))
+
+            vol_to_buy -= vol
+    
+    # Sell orders
+    for i in range(sell_offset, sell_offset + sell_range):
+        curr_price = center_price + i / 100
+        vol_to_sell = math.trunc(max_sell_volume / sell_range)
+
+        while vol_to_sell > 0:
+            vol = min(max_order_size, vol_to_sell)
+            new_book['asks'].append((curr_price, vol))
+
+            vol_to_sell -= vol
+    return new_book
+
 def generate_ideal_book(strategy, ses):
     ideal_book = {
         "bids": [],
         "asks": []
     }
-    #sec_best_bid = book.get_best_bid(ses, sec)['price']
-    #sec_best_ask = book.get_best_ask(ses, sec)['price']
-
-    #spread = default_spread
-
     sec_data = securities.security_dict(ses, ticker_sym=sec)[sec]
     sec_last = sec_data.last
     position = sec_data.position
@@ -177,28 +207,36 @@ def generate_ideal_book(strategy, ses):
     if strategy == "simple_weighted":
         max_buy_volume = limit_stock / 2 - position
         max_sell_volume = limit_stock / 2 + position
+        center_price = sec_last
+        ideal_book = _flesh_out_book(ideal_book, center_price, max_buy_volume=max_buy_volume, max_sell_volume=max_sell_volume, buy_range=5, buy_offset=1, sell_range=5, sell_offset=1)
 
-        # Buy orders            
-        for i in range(-5, 0):
-            curr_price = sec_last + i / 100
-            vol_to_buy = math.trunc(max_buy_volume / 5)
-
-            while vol_to_buy > 0:
-                vol = min(max_order_size, vol_to_buy)
-                ideal_book['bids'].append((curr_price, vol))
-
-                vol_to_buy -= vol
+    elif strategy == "swoop_best":
+        # Beat the best order in the book to close position, then do normal weighting
+        max_buy_volume = limit_stock / 2 - position
+        max_sell_volume = limit_stock / 2 + position
         
-        # Sell orders
-        for i in range(1, 6):
-            curr_price = sec_last + i / 100
-            vol_to_sell = math.trunc(max_sell_volume / 5)
+        bids_asks = book.get_all_bids_asks(ses, sec)
+        curr_bids = bids_asks['bids']
+        curr_asks = bids_asks['asks']
+        if position < 0:
+            best_bid = 0
+            for order in curr_bids:
+                if order['price'] > best_bid:
+                    best_bid = order['price']
+            ideal_book['bids'].append((best_bid, abs(position)))
+        elif position > 0:
+            best_ask = 99999
+            for order in curr_asks:
+                if order['price'] < best_ask:
+                    best_ask = order['price']
+            ideal_book['asks'].append((best_ask, abs(position)))
+        
+        ideal_book = _flesh_out_book(ideal_book, sec_last, max_buy_volume=max_buy_volume, max_sell_volume=max_sell_volume, buy_range=5, buy_offset=1, sell_range=5, sell_offset=1)
+        
+    #sec_best_ask = book.get_best_ask(ses, sec)['price']
 
-            while vol_to_sell > 0:
-                vol = min(max_order_size, vol_to_sell)
-                ideal_book['asks'].append((curr_price, vol))
+    #spread = default_spread
 
-                vol_to_sell -= vol
     return ideal_book
 
 def main():
