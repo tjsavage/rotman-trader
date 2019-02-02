@@ -4,6 +4,7 @@ import time
 from time import sleep
 import math
 import sys
+from scipy import stats
 
 import pandas as pd
 import numpy as np
@@ -29,7 +30,7 @@ sell_volume = 2000
 start_time = 295
 stop_time = 5
 max_order_size = 5000
-lag = 0.01
+lag = 0.250
 limit_stock = 25000
 
 class ApiException(Exception):
@@ -196,6 +197,9 @@ def _flesh_out_book(curr_book, center_price, max_buy_volume=25000, max_sell_volu
     return new_book
 
 def generate_ideal_book(strategy, ses):
+    # Make it easy to test out different strategies
+
+    # Get the minimum amount of data needed from the server
     ideal_book = {
         "bids": [],
         "asks": []
@@ -223,16 +227,69 @@ def generate_ideal_book(strategy, ses):
             for order in curr_bids:
                 if order['price'] > best_bid:
                     best_bid = order['price']
-            ideal_book['bids'].append((best_bid, abs(position)))
+            ideal_book['bids'].append((best_bid, abs(position / 2)))
         elif position > 0:
             best_ask = 99999
             for order in curr_asks:
                 if order['price'] < best_ask:
                     best_ask = order['price']
-            ideal_book['asks'].append((best_ask, abs(position)))
+            ideal_book['asks'].append((best_ask, abs(position / 2)))
         
         ideal_book = _flesh_out_book(ideal_book, sec_last, max_buy_volume=max_buy_volume, max_sell_volume=max_sell_volume, buy_range=5, buy_offset=1, sell_range=5, sell_offset=1)
+    elif strategy == "swoop_and_spread":
+        # Beat the best order in the book to close position, then do normal weighting
+        max_buy_volume = limit_stock / 2 - position
+        max_sell_volume = limit_stock / 2 + position
+
+        bids_asks = book.get_all_bids_asks(ses, sec)
+        curr_bids = bids_asks['bids']
+        curr_asks = bids_asks['asks']
+
+        buy_offset = 1
+        sell_offset = 1
+        if position < 0:
+            best_bid = 0
+            for order in curr_bids:
+                if order['price'] > best_bid:
+                    best_bid = order['price']
+            ideal_book['bids'].append((best_bid, abs(position / 2)))
+
+            sell_offset += round(abs(position) / 5000)
+        elif position > 0:
+            best_ask = 99999
+            for order in curr_asks:
+                if order['price'] < best_ask:
+                    best_ask = order['price']
+            ideal_book['asks'].append((best_ask, abs(position / 2)))
         
+            buy_offset += round(abs(position) / 5000)
+        ideal_book = _flesh_out_book(ideal_book, sec_last, max_buy_volume=max_buy_volume, max_sell_volume=max_sell_volume, buy_range=6, buy_offset=buy_offset, sell_range=6, sell_offset=sell_offset)
+    elif strategy == "normal":
+        print("normal is broken don't use it yet!")
+        center_price_cents = sec_last * 100 + round(position / 4000)
+        sdev_cents = 2
+        print((center_price_cents, sdev_cents))
+        dist = stats.norm(center_price_cents, sdev_cents)
+
+        max_buy_volume = limit_stock / 2 - position
+        max_sell_volume = limit_stock / 2 + position
+
+        remaining_buy_volume = max_buy_volume
+        remaining_sell_volume = max_sell_volume
+
+        for i in range(int(-sdev_cents * 3), int(sdev_cents * 3 + 1)):
+            p = round(center_price_cents / 100 + i / 100, 2)
+            ideal_vol = (dist.cdf(p*100+1) - dist.cdf(p * 100)) * max_buy_volume
+            if p < sec_last:
+                actual_vol = min(remaining_buy_volume, ideal_vol)
+
+                ideal_book['bids'].append((p, actual_vol))
+                remaining_buy_volume -= actual_vol
+            elif p > sec_last:
+                actual_vol = min(remaining_sell_volume, ideal_vol)
+                
+                ideal_book['asks'].append((p, actual_vol))
+                remaining_sell_volume -= actual_vol            
     #sec_best_ask = book.get_best_ask(ses, sec)['price']
 
     #spread = default_spread
