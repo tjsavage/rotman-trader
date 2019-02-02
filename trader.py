@@ -28,7 +28,7 @@ sell_volume = 2000
 start_time = 295
 stop_time = 5
 max_order_size = 5000
-lag = 0.5
+lag = 0.1
 limit_stock = 25000
 
 class ApiException(Exception):
@@ -157,7 +157,48 @@ def execute_orders(ses, sec, orders):
         broker.limit_order(ses, sec, 'SELL', v, p)
     
     for c in cancels:
-        broker.cancel_order(ses, c)        
+        broker.cancel_order(ses, c)
+
+def generate_ideal_book(strategy, ses):
+    ideal_book = {
+        "bids": [],
+        "asks": []
+    }
+    #sec_best_bid = book.get_best_bid(ses, sec)['price']
+    #sec_best_ask = book.get_best_ask(ses, sec)['price']
+
+    #spread = default_spread
+
+    sec_data = securities.security_dict(ses, ticker_sym=sec)[sec]
+    sec_last = sec_data.last
+    position = sec_data.position
+
+    if strategy == "weighted book":
+        max_buy_volume = limit_stock / 2 - position
+        max_sell_volume = limit_stock / 2 + position
+
+        # Buy orders            
+        for i in range(-5, 0):
+            curr_price = sec_last + i / 100
+            vol_to_buy = math.trunc(max_buy_volume / 5)
+
+            while vol_to_buy > 0:
+                vol = min(max_order_size, vol_to_buy)
+                ideal_book['bids'].append((curr_price, vol))
+
+                vol_to_buy -= vol
+        
+        # Sell orders
+        for i in range(1, 6):
+            curr_price = sec_last + i / 100
+            vol_to_sell = math.trunc(max_sell_volume / 5)
+
+            while vol_to_sell > 0:
+                vol = min(max_order_size, vol_to_sell)
+                ideal_book['asks'].append((curr_price, vol))
+
+                vol_to_sell -= vol
+    return ideal_book
 
 def main():
     print("Booting up")
@@ -181,69 +222,12 @@ def main():
             time.sleep(1)
 
         while tick >= stop_time and tick <= start_time and not shutdown:
-            sec_best_bid = book.get_best_bid(ses, sec)['price']
-            sec_best_ask = book.get_best_ask(ses, sec)['price']
-
-            spread = default_spread
-
-            sec_data = securities.security_dict(ses, ticker_sym=sec)[sec]
-            sec_last = sec_data.last
-            position = sec_data.position
-
             orders_dict = orders.orders_dict(ses)
-    
-           #broker.cancel_order_bulk(ses, "<","0","<","0",all_flag=1)
-
-            max_buy_volume = limit_stock / 2 - position
-            max_sell_volume = limit_stock / 2 + position
-
-            bids = []
-            asks = []
-
-            # Buy orders            
-            for i in range(-5, 0):
-                curr_price = sec_last + i / 100
-                vol_to_buy = math.trunc(max_buy_volume / 5)
-
-                while vol_to_buy > 0:
-                    vol = min(max_order_size, vol_to_buy)
-                    bids.append((curr_price, vol))
-
-                    vol_to_buy -= vol
-            
-            # Sell orders
-            for i in range(1, 6):
-                curr_price = sec_last + i / 100
-                vol_to_sell = math.trunc(max_sell_volume / 5)
-
-                while vol_to_sell > 0:
-                    vol = min(max_order_size, vol_to_sell)
-                    asks.append((curr_price, vol))
-
-                    vol_to_sell -= vol
-
-
-            print("Position: %d" % position)
-
             curr_book = _convert_orders_dict_to_book(orders_dict)
-            ideal_book = {
-                "bids": bids,
-                "asks": asks
-            }
-
+            ideal_book = generate_ideal_book("weighted book", ses)
             trades = get_trades_for_ideal_book(curr_book, ideal_book, max_trade=max_order_size)
 
             execute_orders(ses, sec, trades)
-
-            '''
-            for bid in bids:
-                p, q = bid
-                broker.limit_order(ses, sec, 'BUY', q, p)
-            
-            for ask in asks:
-                p, q = ask
-                broker.limit_order(ses, sec, 'SELL', q, p)
-            '''
 
             sleep(lag)
 
