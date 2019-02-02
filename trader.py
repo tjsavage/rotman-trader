@@ -39,6 +39,101 @@ def signal_handler(signum, frame):
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     shutdown = True
 
+def _price_vol_array_to_price_dict(arr):
+    price_dict = {}
+
+    for price, vol in arr:
+        if price not in price_dict:
+            price_dict[price] = 0
+        price_dict[price] += vol
+    return price_dict
+
+def get_trades_for_ideal_book(curr_book, ideal_book, max_trade=None):
+    '''
+    curr_book should be of the form:
+    {
+        bids: { id: (price, vol) },
+        asks: { id: (price, vol) }
+    }
+
+    ideal_book should be of the form:
+    {   bids: [(price, vol)],
+        asks: [(price, vol)]
+    }
+    where volume is positive for bids and negative for asks
+
+    returns:
+    {
+        bids: [(price, vol)],
+        asks: [(price, vol)],
+        cancels: [orderId]
+    }
+    '''
+   
+    curr_vol_by_price = {"bids":{}, "asks":{}}
+    curr_orders_by_price = {"bids":{}, "asks":{}}
+    new_vol_by_price = {"bids":{}, "asks":{}}
+    new_orders = {"bids":[], "asks":[], "cancels":[]}
+
+    for direction in ["bids", "asks"]:
+        for id, val in curr_book[direction].items():
+            p, vol = val
+            if p not in curr_vol_by_price[direction]:
+                curr_vol_by_price[direction][p] = 0
+            curr_vol_by_price[direction][p] += vol
+
+            if p not in curr_orders_by_price[direction]:
+                curr_orders_by_price[direction][p] = []
+            curr_orders_by_price[direction][p].append((id, p, vol))
+        
+        ideal_vol_by_price = _price_vol_array_to_price_dict(ideal_book[direction])
+
+        prices = set(curr_vol_by_price[direction].keys()).union(set(ideal_vol_by_price.keys()))
+
+        for p in sorted(prices):
+            if p in ideal_vol_by_price:
+                curr_vol = curr_vol_by_price[direction][p] if p in curr_vol_by_price[direction] else 0
+                ideal_vol = ideal_vol_by_price[p]
+
+                if curr_vol < ideal_vol:
+                    new_vol_by_price[direction][p] = ideal_vol - curr_vol
+                elif ideal_vol < curr_vol:
+                    potential_orders = [(id, price, vol) for (id, price, vol) in curr_orders_by_price[direction][p]]
+                    potential_orders = sorted(potential_orders, key=lambda x: x[0])
+
+                    remaining_vol = curr_vol
+                    cancellable_orders = []
+                    i = 0
+                    while remaining_vol > ideal_vol and i < len(potential_orders):
+                        o = potential_orders[i]
+                        cancellable_orders.append(o[0])
+                        remaining_vol -= o[2]
+                    
+                    new_orders['cancels'].extend(cancellable_orders)
+
+                    if remaining_vol < ideal_vol:
+                        new_vol_by_price[direction][p] = ideal_vol - remaining_vol
+
+            else:
+                orders = [id for (id, _price, _vol) in curr_orders_by_price[direction][p]]
+                new_orders['cancels'].extend(orders)
+
+            
+        
+        for p, vol in new_vol_by_price[direction].items():
+            if max_trade and vol > max_trade:
+                remaining_vol = vol
+                while remaining_vol > 0:
+                    trade_vol = min(max_trade, remaining_vol)
+
+                    new_orders[direction].append((p, trade_vol))
+
+                    remaining_vol -= trade_vol
+            else:
+                new_orders[direction].append((p, vol))
+    
+    return new_orders
+
 def main():
     print("Booting up")
     with requests.Session() as ses:
