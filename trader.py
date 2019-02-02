@@ -203,43 +203,44 @@ def generate_ideal_book(strategy, ses):
 
 def main():
     print("Booting up")
-    with requests.Session() as ses:
-        ses.headers.update(API_KEY)
-        current_case = cases.case(ses)
-        current_case_lim = cases.case_limits(ses)
-
-        strategy = "simple_weighted"
-        print(sys.argv)
-        if len(sys.argv) == 2:
-            strategy = sys.argv[1]
-        print("Using strategy: %s" % strategy)
-
-        tick = current_case.tick
-
-        while tick > start_time:
-            print("Waiting start...%d" % (tick - start_time))
+    while not shutdown:
+        with requests.Session() as ses:
+            ses.headers.update(API_KEY)
             current_case = cases.case(ses)
+            current_case_lim = cases.case_limits(ses)
+
+            strategy = "simple_weighted"
+            print(sys.argv)
+            if len(sys.argv) == 2:
+                strategy = sys.argv[1]
+            print("Using strategy: %s" % strategy)
+
             tick = current_case.tick
-            time.sleep(1)
 
-        while tick < stop_time:
-            print("Stopped trading...%d" % tick)
-            current_case = cases.case(ses)
-            tick = current_case.tick
-            time.sleep(1)
+            while tick > start_time:
+                print("Waiting start...%d" % (tick - start_time))
+                current_case = cases.case(ses)
+                tick = current_case.tick
+                time.sleep(1)
 
-        while tick >= stop_time and tick <= start_time and not shutdown:
-            orders_dict = orders.orders_dict(ses)
-            curr_book = _convert_orders_dict_to_book(orders_dict)
-            ideal_book = generate_ideal_book(strategy, ses)
-            trades = get_trades_for_ideal_book(curr_book, ideal_book, max_trade=max_order_size)
+            while tick < stop_time:
+                print("Stopped trading...%d" % tick)
+                current_case = cases.case(ses)
+                tick = current_case.tick
+                time.sleep(1)
 
-            execute_orders(ses, sec, trades)
+            while tick >= stop_time and tick <= start_time and not shutdown:
+                orders_dict = orders.orders_dict(ses)
+                curr_book = _convert_orders_dict_to_book(orders_dict)
+                ideal_book = generate_ideal_book(strategy, ses)
+                trades = get_trades_for_ideal_book(curr_book, ideal_book, max_trade=max_order_size)
 
-            sleep(lag)
+                execute_orders(ses, sec, trades)
 
-            current_case = cases.case(ses)
-            tick = current_case.tick
+                sleep(lag)
+
+                current_case = cases.case(ses)
+                tick = current_case.tick
             
             
 
