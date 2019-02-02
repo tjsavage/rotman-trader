@@ -29,7 +29,7 @@ sell_volume = 2000
 start_time = 295
 stop_time = 5
 max_order_size = 5000
-lag = 0.1
+lag = 0.01
 limit_stock = 25000
 
 class ApiException(Exception):
@@ -214,7 +214,7 @@ def generate_ideal_book(strategy, ses):
         # Beat the best order in the book to close position, then do normal weighting
         max_buy_volume = limit_stock / 2 - position
         max_sell_volume = limit_stock / 2 + position
-        
+
         bids_asks = book.get_all_bids_asks(ses, sec)
         curr_bids = bids_asks['bids']
         curr_asks = bids_asks['asks']
