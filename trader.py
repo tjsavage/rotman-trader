@@ -27,11 +27,12 @@ sec = "ALGO"
 default_spread = 0.02
 buy_volume = 2000
 sell_volume = 2000
-start_time = 295
-stop_time = 5
+start_time = 298
+stop_time = 2
 max_order_size = 5000
-lag = 0.250
-limit_stock = 25000
+lag = 0
+limit_stock = 21000
+limit_stock_ratio = 2.0 / 5
 
 class ApiException(Exception):
     pass
@@ -196,7 +197,7 @@ def _flesh_out_book(curr_book, center_price, max_buy_volume=25000, max_sell_volu
             vol_to_sell -= vol
     return new_book
 
-def generate_ideal_book(strategy, ses):
+def generate_ideal_book(strategy, ses, sec_data):
     # Make it easy to test out different strategies
 
     # Get the minimum amount of data needed from the server
@@ -204,20 +205,19 @@ def generate_ideal_book(strategy, ses):
         "bids": [],
         "asks": []
     }
-    sec_data = securities.security_dict(ses, ticker_sym=sec)[sec]
     sec_last = sec_data.last
     position = sec_data.position
 
     if strategy == "simple_weighted":
-        max_buy_volume = limit_stock / 2 - position
-        max_sell_volume = limit_stock / 2 + position
+        max_buy_volume = limit_stock * limit_stock_ratio - position
+        max_sell_volume = limit_stock * limit_stock_ratio + position
         center_price = sec_last
         ideal_book = _flesh_out_book(ideal_book, center_price, max_buy_volume=max_buy_volume, max_sell_volume=max_sell_volume, buy_range=5, buy_offset=1, sell_range=5, sell_offset=1)
 
     elif strategy == "swoop_best":
         # Beat the best order in the book to close position, then do normal weighting
-        max_buy_volume = limit_stock / 2 - position
-        max_sell_volume = limit_stock / 2 + position
+        max_buy_volume = limit_stock * limit_stock_ratio - position
+        max_sell_volume = limit_stock * limit_stock_ratio + position
 
         bids_asks = book.get_all_bids_asks(ses, sec)
         curr_bids = bids_asks['bids']
@@ -236,6 +236,22 @@ def generate_ideal_book(strategy, ses):
             ideal_book['asks'].append((best_ask, abs(position / 2)))
         
         ideal_book = _flesh_out_book(ideal_book, sec_last, max_buy_volume=max_buy_volume, max_sell_volume=max_sell_volume, buy_range=5, buy_offset=1, sell_range=5, sell_offset=1)
+    elif strategy == "spread":
+        max_buy_volume = limit_stock * limit_stock_ratio - position
+        max_sell_volume = limit_stock * limit_stock_ratio + position
+
+        #bids_asks = book.get_all_bids_asks(ses, sec)
+        #curr_bids = bids_asks['bids']
+        #curr_asks = bids_asks['asks']
+
+        buy_offset = 1
+        sell_offset = 1
+        if position < 0:
+            sell_offset += round(abs(position) / 5000)
+        elif position > 0:       
+            buy_offset += round(abs(position) / 5000)
+        ideal_book = _flesh_out_book(ideal_book, sec_last, max_buy_volume=max_buy_volume, max_sell_volume=max_sell_volume, buy_range=6, buy_offset=buy_offset, sell_range=6, sell_offset=sell_offset)
+
     elif strategy == "swoop_and_spread":
         # Beat the best order in the book to close position, then do normal weighting
         max_buy_volume = limit_stock / 2 - position
@@ -312,6 +328,12 @@ def main():
 
             tick = current_case.tick
 
+            data = {
+                "tick_price_variances": []
+            }
+
+            current_tick_prices = []
+
             while tick > start_time:
                 print("Waiting start...%d" % (tick - start_time))
                 current_case = cases.case(ses)
@@ -325,9 +347,11 @@ def main():
                 time.sleep(1)
 
             while tick >= stop_time and tick <= start_time and not shutdown:
+                sec_data = securities.security_dict(ses, ticker_sym=sec)[sec]
+
                 orders_dict = orders.orders_dict(ses)
                 curr_book = _convert_orders_dict_to_book(orders_dict)
-                ideal_book = generate_ideal_book(strategy, ses)
+                ideal_book = generate_ideal_book(strategy, ses, sec_data)
                 trades = get_trades_for_ideal_book(curr_book, ideal_book, max_trade=max_order_size)
 
                 execute_orders(ses, sec, trades)
@@ -335,6 +359,15 @@ def main():
                 sleep(lag)
 
                 current_case = cases.case(ses)
+                '''
+                if current_case.tick != tick:
+                    v = np.var(current_tick_prices)
+                    data['tick_price_variances'].append(v)
+                    current_tick_prices = []
+                    # calculate last variance and reset
+                
+                current_tick_prices.append(sec_data.last)
+                '''
                 tick = current_case.tick
             
             
