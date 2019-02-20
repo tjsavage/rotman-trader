@@ -16,7 +16,7 @@ from ritpytrading.ritpytrading import submit_cancel_orders as broker
 from ritpytrading.ritpytrading import orders
 from ritpytrading.ritpytrading import securities
 
-API_KEY = {'X-API-Key': 'PEGP33T3'}
+API_KEY = {'X-API-Key': 'S5RVSVM5'}
 shutdown = False
 
 host_url = 'localhost:9999'

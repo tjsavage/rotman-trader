@@ -73,7 +73,13 @@ def trade(strategy, ses, tick, securities_data, orders_data):
         elif portfolio_delta < BASE['lower_delta_threshold']:
             vol = BASE['lower_delta_threshold'] - portfolio_delta
             broker.market_order(ses, "SAC", "BUY", vol)
-   
+    elif strategy == "base_zero":
+        if portfolio_delta > BASE['upper_delta_threshold']:
+            vol = portfolio_delta
+            broker.market_order(ses, "SAC", "SELL", vol)
+        elif portfolio_delta < BASE['lower_delta_threshold']:
+            vol = 0 - portfolio_delta
+            broker.market_order(ses, "SAC", "BUY", vol)
 
 
 def main():
